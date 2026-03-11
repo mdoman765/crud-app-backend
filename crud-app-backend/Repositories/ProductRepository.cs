@@ -13,7 +13,7 @@ namespace crud_app_backend.Repositories
         }
 
         public async Task<IEnumerable<Product>> GetAllAsync(
-            string? search, string? category, bool? isActive)
+            string? search, bool? isActive)
         {
             var query = _context.Products.AsQueryable();
 
@@ -22,8 +22,8 @@ namespace crud_app_backend.Repositories
                     p.Name.Contains(search) ||
                     (p.Description != null && p.Description.Contains(search)));
 
-            if (!string.IsNullOrWhiteSpace(category))
-                query = query.Where(p => p.Category == category);
+            //if (!string.IsNullOrWhiteSpace(category))
+            //    query = query.Where(p => p.Category == category);
 
             if (isActive.HasValue)
                 query = query.Where(p => p.IsActive == isActive.Value);
@@ -50,7 +50,7 @@ namespace crud_app_backend.Repositories
             existing.Name = product.Name;
             existing.Description = product.Description;
             existing.Price = product.Price;
-            existing.Category = product.Category;
+           
             existing.Stock = product.Stock;
             existing.IsActive = product.IsActive;
             existing.ImageUrl = product.ImageUrl;
@@ -70,12 +70,14 @@ namespace crud_app_backend.Repositories
             return true;
         }
 
-        public async Task<IEnumerable<string>> GetCategoriesAsync() =>
-            await _context.Products
-                .Where(p => p.Category != null)
-                .Select(p => p.Category!)
-                .Distinct()
-                .OrderBy(c => c)
+        //public async Task<IEnumerable<string>> GetCategoriesAsync() =>
+        //     await _context.Categories.Select(c=>c.Name).OrderBy(name=>name).ToListAsync();
+        public async Task<IEnumerable<object>> GetCategoriesAsync()
+        {
+            return await _context.Categories
+                .Select(c => new { c.Id, c.Name })
+                .OrderBy(c => c.Name)
                 .ToListAsync();
+        }
     }
 }

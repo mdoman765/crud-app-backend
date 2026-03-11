@@ -22,10 +22,10 @@ namespace crud_app_backend.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAll(
             [FromQuery] string? search,
-            [FromQuery] string? category,
+           
             [FromQuery] bool? isActive)
         {
-            var products = await _service.GetAllAsync(search, category, isActive);
+            var products = await _service.GetAllAsync(search,  isActive);
             return Ok(products);
         }
 

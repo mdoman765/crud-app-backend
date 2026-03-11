@@ -11,9 +11,9 @@ namespace crud_app_backend.Services
         public ProductService(IProductRepository repo) => _repo = repo;
 
         public async Task<IEnumerable<ProductDto>> GetAllAsync(
-            string? search, string? category, bool? isActive)
+            string? search, bool? isActive)
         {
-            var products = await _repo.GetAllAsync(search, category, isActive);
+            var products = await _repo.GetAllAsync(search, isActive);
             return products.Select(MapToDto);
         }
 
@@ -30,7 +30,7 @@ namespace crud_app_backend.Services
                 Name = dto.Name,
                 Description = dto.Description,
                 Price = dto.Price,
-                Category = dto.Category,
+               // Category = dto.Category,
                 Stock = dto.Stock,
                 IsActive = dto.IsActive,
                 ImageUrl = dto.ImageUrl
@@ -46,7 +46,7 @@ namespace crud_app_backend.Services
                 Name = dto.Name,
                 Description = dto.Description,
                 Price = dto.Price,
-                Category = dto.Category,
+              //  Category = dto.Category,
                 Stock = dto.Stock,
                 IsActive = dto.IsActive,
                 ImageUrl = dto.ImageUrl
@@ -57,7 +57,7 @@ namespace crud_app_backend.Services
 
         public Task<bool> DeleteAsync(int id) => _repo.DeleteAsync(id);
 
-        public Task<IEnumerable<string>> GetCategoriesAsync() => _repo.GetCategoriesAsync();
+        public Task<IEnumerable<object>> GetCategoriesAsync() => _repo.GetCategoriesAsync();
 
         private static ProductDto MapToDto(Product p) => new()
         {
@@ -65,7 +65,7 @@ namespace crud_app_backend.Services
             Name = p.Name,
             Description = p.Description,
             Price = p.Price,
-            Category = p.Category,
+            //Category = p.Category,
             Stock = p.Stock,
             IsActive = p.IsActive,
             ImageUrl = p.ImageUrl,
