@@ -16,18 +16,25 @@ namespace crud_app_backend.Controllers
         }
 
 
+        //[HttpPost("login")]
+        //public async Task<IActionResult> Login([FromBody] LoginDto dto)
+        //{
+        //    if (!ModelState.IsValid)
+        //        return BadRequest(ModelState);
+
+        //    var result = await _authService.LoginAsync(dto);
+
+        //    if (result == null)
+        //        return Unauthorized("Invalid username/email or password");
+
+        //    return Ok(result);
+        //}
         [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] LoginDto dto)
+        public  int Login(int shopcode)
         {
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
+            int shop_id = 1234;
 
-            var result = await _authService.LoginAsync(dto);
-
-            if (result == null)
-                return Unauthorized("Invalid username/email or password");
-
-            return Ok(result);
+            return shop_id;
         }
     }
 }

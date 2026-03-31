@@ -21,6 +21,11 @@ builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IWhatsAppSessionRepository, WhatsAppSessionRepository>();
 builder.Services.AddScoped<IWhatsAppSessionService, WhatsAppSessionService>();
+builder.Services.AddScoped<IWhatsAppMessageRepository, WhatsAppMessageRepository>();
+builder.Services.AddScoped<IWhatsAppMessageService, WhatsAppMessageService>();
+builder.Services.AddHttpContextAccessor();
+
+
 
 builder.Services.Configure<FormOptions>(o =>
 {

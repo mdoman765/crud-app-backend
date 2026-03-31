@@ -14,13 +14,66 @@ namespace crud_app_backend
         public DbSet<Order> Orders { get; set; } = null!;
         public DbSet<Feedback> Feedbacks { get; set; } = null!;
         public DbSet<User> Users { get; set; } = null!;
+        public DbSet<WhatsAppMessage> WhatsAppMessages { get; set; } = null!;
 
         // ── WhatsApp tables ──────────────────────────────────────────────
         public DbSet<WhatsAppSession> WhatsAppSessions { get; set; } = null!;
         public DbSet<WhatsAppSessionHistory> WhatsAppSessionHistories { get; set; } = null!;
 
+
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            // 2.  In OnModelCreating (after the WhatsAppSessionHistory config block):
+            modelBuilder.Entity<WhatsAppMessage>(entity =>
+            {
+                entity.ToTable("WhatsAppMessages", "dbo");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                      .HasDefaultValueSql("NEWSEQUENTIALID()");   // clustered-friendly GUID
+
+                entity.Property(e => e.MessageId)
+                      .HasMaxLength(255)
+                      .IsRequired();
+
+                entity.HasIndex(e => e.MessageId)
+                      .IsUnique()
+                      .HasDatabaseName("UX_WhatsAppMessages_MessageId");  // duplicate guard
+
+                entity.Property(e => e.FromNumber)
+                      .HasMaxLength(30)
+                      .IsRequired();
+
+                entity.HasIndex(e => new { e.FromNumber, e.ReceivedAt })
+                      .HasDatabaseName("IX_WhatsAppMessages_FromNumber_ReceivedAt");
+
+                entity.Property(e => e.SenderName).HasMaxLength(255);
+
+                entity.Property(e => e.MessageType)
+                      .HasMaxLength(20)
+                      .IsRequired();
+
+                entity.Property(e => e.TextBody)
+                      .HasColumnType("nvarchar(max)");
+
+                entity.Property(e => e.MediaId).HasMaxLength(255);
+                entity.Property(e => e.FileUrl).HasMaxLength(2048);
+                entity.Property(e => e.MimeType).HasMaxLength(100);
+                entity.Property(e => e.Caption).HasMaxLength(1000);
+
+                entity.Property(e => e.Status)
+                      .HasMaxLength(30)
+                      .IsRequired()
+                      .HasDefaultValue("received");
+
+                entity.Property(e => e.ErrorMessage).HasMaxLength(1000);
+
+                entity.Property(e => e.ReceivedAt)
+                      .IsRequired()
+                      .HasDefaultValueSql("SYSUTCDATETIME()");
+            });
             // ── existing config (unchanged) ──────────────────────────────
             modelBuilder.Entity<Product>(entity =>
             {
