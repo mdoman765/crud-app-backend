@@ -1,58 +1,31 @@
 using crud_app_backend.DTOs;
 using crud_app_backend.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace crud_app_backend.Controllers
 {
-    /// <summary>
-    /// Called by n8n when the staff member confirms Y on the complaint screen.
-    /// This controller fetches the stored voice/image files, assembles the
-    /// full payload, and forwards everything to the CRM API.
-    /// Lives at /api/whatsapp/complaints
-    /// </summary>
     [ApiController]
     [Route("api/whatsapp/complaints")]
     [Produces("application/json")]
     public class WhatsAppComplaintController : ControllerBase
     {
         private readonly IWhatsAppComplaintService _service;
+        private readonly AppDbContext _db;
         private readonly ILogger<WhatsAppComplaintController> _logger;
 
         public WhatsAppComplaintController(
             IWhatsAppComplaintService service,
+            AppDbContext db,
             ILogger<WhatsAppComplaintController> logger)
         {
             _service = service;
-            _logger  = logger;
+            _db = db;
+            _logger = logger;
         }
 
-        // ─────────────────────────────────────────────────────────────────────
         // POST /api/whatsapp/complaints/submit
-        //
-        // n8n sends:
-        // {
-        //   "whatsapp_phone":   "8801704134097",
-        //   "staff_id":         "359778",
-        //   "name":             "Sheikh Shariar Newaz",
-        //   "official_phone":   "01704137508",
-        //   "designation":      "Manager",
-        //   "dept":             "Quality Control",
-        //   "groupname":        "PRAN GROUP",
-        //   "company":          "CS PRAN",
-        //   "locationname":     "Habiganj Industrial Park",
-        //   "email":            "ehs3@hip.prangroup.com",
-        //   "description":      "Product was damaged on delivery",
-        //   "voice_message_ids":["wamid.abc123", "wamid.xyz456"],
-        //   "image_message_ids":["wamid.img001"]
-        // }
-        //
-        // Returns: { "complaint_id": "PR12345", "success": true }
-        // ─────────────────────────────────────────────────────────────────────
-
         [HttpPost("submit")]
-        [ProducesResponseType(typeof(SubmitComplaintResponseDto), StatusCodes.Status200OK)]
-        [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(typeof(ApiResponseDto<object>), StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> Submit(
             [FromBody] SubmitComplaintRequestDto dto,
             CancellationToken ct)
@@ -63,30 +36,120 @@ namespace crud_app_backend.Controllers
             try
             {
                 var result = await _service.SubmitAsync(dto, ct);
-
-                if (!result.Success)
-                {
-                    _logger.LogWarning(
-                        "[Complaint] Submit failed for staff={StaffId}: {Msg}",
-                        dto.StaffId, result.Message);
-
-                    // Still return 200 so n8n can show the user a meaningful error
-                    // rather than a generic HTTP error node failure
-                    return Ok(result);
-                }
-
                 return Ok(result);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex,
-                    "[Complaint] Submit crashed — staff={StaffId} phone={Phone}",
+                _logger.LogError(ex, "[Complaint] Submit crashed — staff={S} phone={P}",
                     dto.StaffId, dto.WhatsappPhone);
-
-                return StatusCode(
-                    StatusCodes.Status500InternalServerError,
-                    ApiResponseDto<object>.Fail("Failed to submit complaint: " + ex.Message));
+                return StatusCode(500, new { success = false, message = ex.Message });
             }
+        }
+
+        // GET /api/whatsapp/complaints
+        // ?phone=8801...   filter by WhatsApp phone
+        // ?staff_id=359778 filter by staff ID
+        // ?status=open     filter by status (open / in_progress / resolved / closed)
+        // ?limit=50        max rows (default 50, max 200)
+        [HttpGet]
+        public async Task<IActionResult> GetAll(
+            [FromQuery] string? phone,
+            [FromQuery] string? staff_id,
+            [FromQuery] string? status,
+            [FromQuery] int limit = 50,
+            CancellationToken ct = default)
+        {
+            if (limit is < 1 or > 200) limit = 50;
+
+            var query = _db.WhatsAppComplaints
+                .Include(c => c.MediaItems)
+                .AsNoTracking()
+                .AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(phone))
+                query = query.Where(c => c.WhatsappPhone == phone.Trim());
+
+            if (!string.IsNullOrWhiteSpace(staff_id))
+                query = query.Where(c => c.StaffId == staff_id.Trim());
+
+            if (!string.IsNullOrWhiteSpace(status))
+                query = query.Where(c => c.Status == status.Trim().ToLower());
+
+            var rows = await query
+                .OrderByDescending(c => c.CreatedAt)
+                .Take(limit)
+                .Select(c => new
+                {
+                    c.Id,
+                    c.ComplaintNumber,
+                    c.WhatsappPhone,
+                    c.StaffId,
+                    c.StaffName,
+                    c.OfficialPhone,
+                    c.Designation,
+                    c.Dept,
+                    c.GroupName,
+                    c.Company,
+                    c.LocationName,
+                    c.Email,
+                    c.Description,
+                    c.Status,
+                    c.CreatedAt,
+                    c.UpdatedAt,
+                    MediaCount = c.MediaItems.Count,
+                    VoiceCount = c.MediaItems.Count(m => m.MediaType == "voice"),
+                    ImageCount = c.MediaItems.Count(m => m.MediaType == "image"),
+                })
+                .ToListAsync(ct);
+
+            return Ok(new { total = rows.Count, data = rows });
+        }
+
+        // GET /api/whatsapp/complaints/{id}
+        // id = numeric (7)  OR  complaint number (PR00007)
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetOne(string id, CancellationToken ct)
+        {
+            var query = _db.WhatsAppComplaints
+                .Include(c => c.MediaItems)
+                .AsNoTracking();
+
+            var complaint = int.TryParse(id, out var numId)
+                ? await query.FirstOrDefaultAsync(c => c.Id == numId, ct)
+                : await query.FirstOrDefaultAsync(c => c.ComplaintNumber == id.ToUpper(), ct);
+
+            if (complaint is null)
+                return NotFound(new { message = $"Complaint '{id}' not found." });
+
+            return Ok(new
+            {
+                complaint.Id,
+                complaint.ComplaintNumber,
+                complaint.WhatsappPhone,
+                complaint.StaffId,
+                complaint.StaffName,
+                complaint.OfficialPhone,
+                complaint.Designation,
+                complaint.Dept,
+                complaint.GroupName,
+                complaint.Company,
+                complaint.LocationName,
+                complaint.Email,
+                complaint.Description,
+                complaint.Status,
+                complaint.CreatedAt,
+                complaint.UpdatedAt,
+                Media = complaint.MediaItems.Select(m => new
+                {
+                    m.Id,
+                    m.MediaType,
+                    m.MessageId,
+                    m.FileUrl,
+                    m.MimeType,
+                    m.Caption,
+                    m.CreatedAt,
+                })
+            });
         }
     }
 }
