@@ -27,11 +27,15 @@ builder.Services.AddScoped<IWhatsAppComplaintService, WhatsAppComplaintService>(
 builder.Services.AddScoped<IWhatsAppComplaintRepository, WhatsAppComplaintRepository>();
 
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddHttpClient("CrmClient", client => {
+builder.Services.AddHttpClient("CrmClient", client =>
+{
+    // CRM uses access-token header (not Bearer Authorization)
     var key = builder.Configuration["Crm:ApiKey"];
     if (!string.IsNullOrWhiteSpace(key))
-        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {key}");
-    client.Timeout = TimeSpan.FromSeconds(30);
+        client.DefaultRequestHeaders.Add("access-token", key);
+
+    // High ceiling — actual timeout controlled per-call via CancellationTokenSource
+    client.Timeout = TimeSpan.FromMinutes(5);
 });
 
 

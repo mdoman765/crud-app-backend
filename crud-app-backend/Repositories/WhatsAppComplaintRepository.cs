@@ -56,6 +56,16 @@ namespace crud_app_backend.Repositories
 
         // ?? QUERIES ???????????????????????????????????????????????????????????
 
+        public async Task UpdateCrmTicketIdAsync(int id, string crmTicketId, CancellationToken ct = default)
+        {
+            var row = await _db.WhatsAppComplaints.FirstOrDefaultAsync(c => c.Id == id, ct);
+            if (row is null) return;
+            row.CrmTicketId = crmTicketId;
+            row.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            _logger.LogInformation("[Complaint-Repo] CRM ticket id={CrmId} saved for complaint={Id}", crmTicketId, id);
+        }
+
         public async Task<WhatsAppComplaint?> GetByIdAsync(
             int id, CancellationToken ct = default) =>
             await _db.WhatsAppComplaints

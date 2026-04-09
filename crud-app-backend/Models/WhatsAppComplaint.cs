@@ -37,6 +37,10 @@ namespace crud_app_backend.Models
         [Column(TypeName = "nvarchar(max)")]
         public string? Description { get; set; }
 
+        /// <summary>Ticket ID returned by CRM e.g. "13". Null until CRM call succeeds.</summary>
+        [MaxLength(50)]
+        public string? CrmTicketId { get; set; } = null;
+
         // ── Status ────────────────────────────────────────────────────────────
         /// <summary>open | in_progress | resolved | closed</summary>
         [Required]
