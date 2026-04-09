@@ -59,11 +59,10 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
-{
+
     app.UseSwagger();
     app.UseSwaggerUI();
-}
+
 
 app.UseCors("AllowAngular");
 app.UseStaticFiles();          // ← serves wwwroot/images/ as /images/
