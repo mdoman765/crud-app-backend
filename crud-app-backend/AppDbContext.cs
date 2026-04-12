@@ -176,6 +176,7 @@ namespace crud_app_backend
                 entity.Property(e => e.Email).HasMaxLength(255);
                 entity.Property(e => e.Description).HasColumnType("nvarchar(max)");
                 entity.Property(e => e.CrmTicketId).HasMaxLength(50);
+                entity.Property(e => e.ComplaintType).HasMaxLength(30).IsRequired().HasDefaultValue("complaint");
                 entity.Property(e => e.Status).HasMaxLength(30).IsRequired().HasDefaultValue("open");
                 entity.Property(e => e.CreatedAt).IsRequired().HasDefaultValueSql("SYSUTCDATETIME()");
                 entity.Property(e => e.UpdatedAt).IsRequired().HasDefaultValueSql("SYSUTCDATETIME()");

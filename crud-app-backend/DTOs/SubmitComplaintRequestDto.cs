@@ -4,9 +4,7 @@ using System.Text.Json.Serialization;
 namespace crud_app_backend.DTOs
 {
     /// <summary>
-    /// Sent by n8n when a staff member confirms Y on the complaint screen.
-    /// Contains staff info (from HRIS session), text description, and
-    /// the message IDs of already-uploaded voice and image files.
+    /// Sent by n8n when a staff member confirms Y on the complaint/agent screen.
     /// </summary>
     public class SubmitComplaintRequestDto
     {
@@ -46,21 +44,30 @@ namespace crud_app_backend.DTOs
 
         // ── Complaint content ─────────────────────────────────────────────────
 
-        /// <summary>All text messages the user sent, joined with newline.</summary>
+        /// <summary>
+        /// All text messages joined with newline. Supports both Bangla and English.
+        /// For agent connect this is: "User wants to connect with a support agent"
+        /// </summary>
         [JsonPropertyName("description")]
         public string? Description { get; set; }
 
         /// <summary>
-        /// IDs returned by POST /api/whatsapp/messages/voice when each
-        /// voice note was uploaded. Your backend fetches the actual file
-        /// using these IDs and forwards the binary to the CRM.
+        /// "complaint" or "agent_connect".
+        /// Defaults to "complaint" if not provided.
+        /// </summary>
+        [JsonPropertyName("complaint_type")]
+        public string ComplaintType { get; set; } = "complaint";
+
+        /// <summary>
+        /// 360dialog messageIds of uploaded voice notes.
+        /// Empty list if user sent no voice notes.
         /// </summary>
         [JsonPropertyName("voice_message_ids")]
         public List<string> VoiceMessageIds { get; set; } = new();
 
         /// <summary>
-        /// IDs returned by POST /api/whatsapp/messages/image when each
-        /// image was uploaded.
+        /// 360dialog messageIds of uploaded images.
+        /// Empty list if user sent no images.
         /// </summary>
         [JsonPropertyName("image_message_ids")]
         public List<string> ImageMessageIds { get; set; } = new();

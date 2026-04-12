@@ -7,25 +7,31 @@ namespace crud_app_backend.DTOs
         [JsonPropertyName("success")]
         public bool Success { get; set; }
 
-        /// <summary>Complaint ID returned by CRM (e.g. "PR12345").</summary>
+        /// <summary>
+        /// CRM ticket ID on success (e.g. "13").
+        /// Null on failure.
+        /// </summary>
         [JsonPropertyName("complaint_id")]
         public string? ComplaintId { get; set; }
 
         [JsonPropertyName("message")]
         public string? Message { get; set; }
 
-        /// <summary>Raw JSON body the CRM returned — useful for debugging.</summary>
-        [JsonPropertyName("crm_response")]
-        public object? CrmResponse { get; set; }
+        /// <summary>
+        /// Populated when success=false.
+        /// n8n reads this and shows it directly to the user.
+        /// </summary>
+        [JsonPropertyName("error_message")]
+        public string? ErrorMessage { get; set; }
     }
 
-    /// <summary>Represents a stored WhatsApp media message loaded for CRM forwarding.</summary>
+    /// <summary>Represents a stored WhatsApp media file loaded for CRM forwarding.</summary>
     public class WhatsAppMediaFile
     {
         public string MessageId { get; set; } = string.Empty;
-        public string FileName   { get; set; } = string.Empty;
-        public string MimeType   { get; set; } = string.Empty;
-        public byte[] Data       { get; set; } = Array.Empty<byte>();
-        public string? Caption   { get; set; }
+        public string FileName { get; set; } = string.Empty;
+        public string MimeType { get; set; } = string.Empty;
+        public byte[] Data { get; set; } = Array.Empty<byte>();
+        public string? Caption { get; set; }
     }
 }

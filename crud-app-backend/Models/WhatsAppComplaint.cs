@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace crud_app_backend.Models
 {
     /// <summary>
-    /// One row per complaint submitted via WhatsApp chatbot.
+    /// One row per complaint or agent-connect request submitted via WhatsApp.
     /// Linked to WhatsAppComplaintMedia for voice notes and images.
     /// </summary>
     public class WhatsAppComplaint
@@ -34,8 +34,15 @@ namespace crud_app_backend.Models
         [MaxLength(255)] public string? Email { get; set; }
 
         // ── Complaint content ─────────────────────────────────────────────────
+
         [Column(TypeName = "nvarchar(max)")]
         public string? Description { get; set; }
+
+        /// <summary>
+        /// "complaint" | "agent_connect"
+        /// </summary>
+        [MaxLength(30)]
+        public string ComplaintType { get; set; } = "complaint";
 
         /// <summary>Ticket ID returned by CRM e.g. "13". Null until CRM call succeeds.</summary>
         [MaxLength(50)]

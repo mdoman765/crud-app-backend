@@ -35,52 +35,17 @@ namespace crud_app_backend.Services
             SubmitComplaintRequestDto req, CancellationToken ct)
         {
             _logger.LogInformation(
-                "[Complaint] Submit — staff={S} phone={P} voices={V} images={I}",
-                req.StaffId, req.WhatsappPhone,
+                "[Complaint] Submit — type={T} staff={S} phone={P} voices={V} images={I}",
+                req.ComplaintType, req.StaffId, req.WhatsappPhone,
                 req.VoiceMessageIds.Count, req.ImageMessageIds.Count);
 
-            // ── STEP 1: Save complaint to YOUR database ───────────────────────
-            var complaint = new WhatsAppComplaint
-            {
-                WhatsappPhone = req.WhatsappPhone,
-                StaffId = req.StaffId,
-                StaffName = req.Name,
-                OfficialPhone = req.OfficialPhone,
-                Designation = req.Designation,
-                Dept = req.Dept,
-                GroupName = req.GroupName,
-                Company = req.Company,
-                LocationName = req.LocationName,
-                Email = req.Email,
-                Description = req.Description,
-                Status = "open",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-            };
-
-            await _complaintRepo.InsertAsync(complaint, ct);
-
-            var complaintNumber = $"PR{complaint.Id:D5}";
-            await _complaintRepo.UpdateComplaintNumberAsync(complaint.Id, complaintNumber, ct);
-
-            // ── STEP 2: Load voice files directly from disk + save media rows ─
+            // ── STEP 1: Load voice files from disk ────────────────────────────
+            // Done before CRM call so files are ready to send.
             var voiceFiles = new List<(string FileName, string MimeType, byte[] Data)>();
-
             foreach (var msgId in req.VoiceMessageIds)
             {
                 if (string.IsNullOrWhiteSpace(msgId)) continue;
-
                 var waMsg = await _messageRepo.GetByMessageIdAsync(msgId, ct);
-
-                await _complaintRepo.InsertMediaAsync(new WhatsAppComplaintMedia
-                {
-                    ComplaintId = complaint.Id,
-                    MessageId = msgId,
-                    MediaType = "voice",
-                    FileUrl = waMsg?.FileUrl,
-                    MimeType = waMsg?.MimeType ?? "audio/ogg",
-                }, ct);
-
                 var file = ReadFileDirect(msgId, "audio", waMsg?.MimeType ?? "audio/ogg");
                 if (file is not null)
                 {
@@ -94,25 +59,12 @@ namespace crud_app_backend.Services
                 }
             }
 
-            // ── STEP 3: Load image files directly from disk + save media rows ─
+            // ── STEP 2: Load image files from disk ────────────────────────────
             var imageFiles = new List<(string FileName, string MimeType, byte[] Data)>();
-
             foreach (var msgId in req.ImageMessageIds)
             {
                 if (string.IsNullOrWhiteSpace(msgId)) continue;
-
                 var waMsg = await _messageRepo.GetByMessageIdAsync(msgId, ct);
-
-                await _complaintRepo.InsertMediaAsync(new WhatsAppComplaintMedia
-                {
-                    ComplaintId = complaint.Id,
-                    MessageId = msgId,
-                    MediaType = "image",
-                    FileUrl = waMsg?.FileUrl,
-                    MimeType = waMsg?.MimeType ?? "image/jpeg",
-                    Caption = waMsg?.Caption,
-                }, ct);
-
                 var file = ReadFileDirect(msgId, "images", waMsg?.MimeType ?? "image/jpeg");
                 if (file is not null)
                 {
@@ -126,29 +78,98 @@ namespace crud_app_backend.Services
                 }
             }
 
+            // ── STEP 3: Send to CRM FIRST ─────────────────────────────────────
+            // Only save to DB if CRM succeeds.
+            // Uses independent 120s timeout so n8n request timeout won't cancel it.
+            var (crmTicketId, crmError) = await SendToCrmAsync(req, voiceFiles, imageFiles);
+
+            if (crmTicketId is null)
+            {
+                // CRM failed — do NOT save to DB, return error to n8n
+                _logger.LogWarning("[Complaint] CRM failed — skipping DB save. Error: {E}", crmError);
+                return new SubmitComplaintResponseDto
+                {
+                    Success = false,
+                    ComplaintId = null,
+                    ErrorMessage = crmError ?? "Could not reach support team. Please try again.",
+                    Message = "CRM submission failed",
+                };
+            }
+
+            // ── STEP 4: CRM succeeded — now save to YOUR DB ───────────────────
+            var complaint = new WhatsAppComplaint
+            {
+                WhatsappPhone = req.WhatsappPhone,
+                StaffId = req.StaffId,
+                StaffName = req.Name,
+                OfficialPhone = req.OfficialPhone,
+                Designation = req.Designation,
+                Dept = req.Dept,
+                GroupName = req.GroupName,
+                Company = req.Company,
+                LocationName = req.LocationName,
+                Email = req.Email,
+                Description = req.Description,
+                ComplaintType = req.ComplaintType,
+                CrmTicketId = crmTicketId,          // already known — set at insert
+                Status = "open",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+
+            await _complaintRepo.InsertAsync(complaint, ct);
+
+            var complaintNumber = $"PR{complaint.Id:D5}";
+            await _complaintRepo.UpdateComplaintNumberAsync(complaint.Id, complaintNumber, ct);
+
+            // ── STEP 5: Save media rows ───────────────────────────────────────
+            foreach (var msgId in req.VoiceMessageIds)
+            {
+                if (string.IsNullOrWhiteSpace(msgId)) continue;
+                var waMsg = await _messageRepo.GetByMessageIdAsync(msgId, ct);
+                await _complaintRepo.InsertMediaAsync(new WhatsAppComplaintMedia
+                {
+                    ComplaintId = complaint.Id,
+                    MessageId = msgId,
+                    MediaType = "voice",
+                    FileUrl = waMsg?.FileUrl,
+                    MimeType = waMsg?.MimeType ?? "audio/ogg",
+                }, ct);
+            }
+
+            foreach (var msgId in req.ImageMessageIds)
+            {
+                if (string.IsNullOrWhiteSpace(msgId)) continue;
+                var waMsg = await _messageRepo.GetByMessageIdAsync(msgId, ct);
+                await _complaintRepo.InsertMediaAsync(new WhatsAppComplaintMedia
+                {
+                    ComplaintId = complaint.Id,
+                    MessageId = msgId,
+                    MediaType = "image",
+                    FileUrl = waMsg?.FileUrl,
+                    MimeType = waMsg?.MimeType ?? "image/jpeg",
+                    Caption = waMsg?.Caption,
+                }, ct);
+            }
+
             _logger.LogInformation(
-                "[Complaint] DB saved: {N} | Files ready: voices={V} images={I}",
-                complaintNumber, voiceFiles.Count, imageFiles.Count);
-
-            // ── STEP 4: POST to CRM — independent timeout, not the request ct ─
-            var crmTicketId = await SendToCrmAsync(req, voiceFiles, imageFiles);
-
-            // ── STEP 5: Store CRM ticket ID back in your DB ───────────────────
-            if (crmTicketId is not null)
-                await _complaintRepo.UpdateCrmTicketIdAsync(complaint.Id, crmTicketId, ct);
+                "[Complaint] Saved — complaintNumber={N} crmTicketId={C} voices={V} images={I}",
+                complaintNumber, crmTicketId,
+                req.VoiceMessageIds.Count, req.ImageMessageIds.Count);
 
             return new SubmitComplaintResponseDto
             {
                 Success = true,
-                ComplaintId = crmTicketId ?? complaintNumber,
-                Message = crmTicketId is not null
-                    ? "Complaint submitted to support team"
-                    : "Complaint saved (CRM sync pending)",
+                ComplaintId = crmTicketId,
+                Message = req.ComplaintType == "agent_connect"
+                    ? "Support agent request submitted successfully"
+                    : "Complaint submitted to support team",
             };
         }
 
         // ─────────────────────────────────────────────────────────────────────
         // Read file directly from wwwroot/wa-media/{subFolder}/{messageId}.ext
+        // WhatsAppMessageService saves files here — we know the exact path.
         // ─────────────────────────────────────────────────────────────────────
         private (string FileName, string MimeType, byte[] Data)?
             ReadFileDirect(string messageId, string subFolder, string mimeType)
@@ -165,7 +186,7 @@ namespace crud_app_backend.Services
                     return ($"{messageId}{ext}", mimeType, bytes);
                 }
 
-                // Fallback: any file starting with the messageId
+                // Fallback: glob for any file starting with the messageId
                 var matches = Directory.Exists(folder)
                     ? Directory.GetFiles(folder, $"{messageId}*")
                     : Array.Empty<string>();
@@ -187,11 +208,12 @@ namespace crud_app_backend.Services
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // POST multipart/form-data to CRM
-        // Independent 120s timeout — NOT using the request CancellationToken
-        // so n8n timing out cannot cancel the CRM upload.
+        // POST multipart/form-data to CRM.
+        // Returns (crmTicketId, null) on success.
+        // Returns (null, errorMessage) on failure — errorMessage shown to user.
+        // Independent 120s timeout — NOT the request ct.
         // ─────────────────────────────────────────────────────────────────────
-        private async Task<string?> SendToCrmAsync(
+        private async Task<(string? TicketId, string? Error)> SendToCrmAsync(
             SubmitComplaintRequestDto req,
             List<(string FileName, string MimeType, byte[] Data)> voiceFiles,
             List<(string FileName, string MimeType, byte[] Data)> imageFiles)
@@ -199,8 +221,8 @@ namespace crud_app_backend.Services
             var crmUrl = _config["Crm:SubmitUrl"];
             if (string.IsNullOrWhiteSpace(crmUrl))
             {
-                _logger.LogWarning("[Complaint] Crm:SubmitUrl not configured — skipping CRM");
-                return null;
+                _logger.LogWarning("[Complaint] Crm:SubmitUrl not configured");
+                return (null, "CRM is not configured. Please contact system admin.");
             }
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
@@ -209,9 +231,8 @@ namespace crud_app_backend.Services
             {
                 using var form = new MultipartFormDataContent();
 
-                // ── Always send ALL text fields even if empty ─────────────────
-                // The CRM PHP code does foreach() on some fields — sending empty
-                // string is safer than omitting the field entirely (which gives null).
+                // Always send all text fields — even empty string.
+                // PHP foreach() crashes if field is missing (null) but handles "" fine.
                 void Text(string key, string? val)
                     => form.Add(new StringContent(val ?? string.Empty), key);
 
@@ -227,26 +248,20 @@ namespace crud_app_backend.Services
                 Text("email", req.Email);
                 Text("description", req.Description);
 
-                // ── Voice files → voice_file[] ────────────────────────────────
-                if (voiceFiles.Count > 0)
+                // Voice files → voice_file[] (actual binary)
+                foreach (var (fileName, mimeType, data) in voiceFiles)
                 {
-                    foreach (var (fileName, mimeType, data) in voiceFiles)
-                    {
-                        var content = new ByteArrayContent(data);
-                        content.Headers.ContentType = new MediaTypeHeaderValue(mimeType);
-                        form.Add(content, "voice_file[]", fileName);
-                    }
+                    var content = new ByteArrayContent(data);
+                    content.Headers.ContentType = new MediaTypeHeaderValue(mimeType);
+                    form.Add(content, "voice_file[]", fileName);
                 }
 
-                // ── Image files → images[] ────────────────────────────────────
-                if (imageFiles.Count > 0)
+                // Image files → images[] (actual binary)
+                foreach (var (fileName, mimeType, data) in imageFiles)
                 {
-                    foreach (var (fileName, mimeType, data) in imageFiles)
-                    {
-                        var content = new ByteArrayContent(data);
-                        content.Headers.ContentType = new MediaTypeHeaderValue(mimeType);
-                        form.Add(content, "images[]", fileName);
-                    }
+                    var content = new ByteArrayContent(data);
+                    content.Headers.ContentType = new MediaTypeHeaderValue(mimeType);
+                    form.Add(content, "images[]", fileName);
                 }
 
                 var client = _httpFactory.CreateClient("CrmClient");
@@ -259,23 +274,33 @@ namespace crud_app_backend.Services
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("[Complaint] CRM non-2xx: {Code} — {Body}",
+                    var httpError = $"Support system returned error {(int)response.StatusCode}. Please try again.";
+                    _logger.LogWarning("[Complaint] CRM HTTP {Code}: {Body}",
                         (int)response.StatusCode, body);
-                    return null;
+                    return (null, httpError);
                 }
 
-                // ── Parse: { "status": "success", "data": { "id": 13 } } ──────
+                // Parse: { "status": "success", "data": { "id": 13 } }
                 using var doc = JsonDocument.Parse(body);
                 var root = doc.RootElement;
 
+                // Check status field
                 if (root.TryGetProperty("status", out var sv) &&
                     sv.GetString()?.ToLower() != "success")
                 {
-                    _logger.LogWarning("[Complaint] CRM returned status={S} body={B}",
-                        sv.GetString(), body.Length > 300 ? body[..300] : body);
-                    return null;
+                    // Extract CRM's own message if available
+                    var crmMsg = root.TryGetProperty("message", out var mv)
+                        ? mv.GetString()
+                        : null;
+                    var errMsg = string.IsNullOrWhiteSpace(crmMsg)
+                        ? "Support system could not process the request. Please try again."
+                        : crmMsg;
+                    _logger.LogWarning("[Complaint] CRM status={S} message={M}",
+                        sv.GetString(), crmMsg);
+                    return (null, errMsg);
                 }
 
+                // Extract ticket ID from data.id
                 if (root.TryGetProperty("data", out var dataEl) &&
                     dataEl.TryGetProperty("id", out var idEl))
                 {
@@ -283,16 +308,21 @@ namespace crud_app_backend.Services
                         ? idEl.GetInt32().ToString()
                         : idEl.GetString();
 
-                    _logger.LogInformation("[Complaint] CRM ticket id={Id}", crmId);
-                    return crmId;
+                    _logger.LogInformation("[Complaint] CRM ticket created — id={Id}", crmId);
+                    return (crmId, null);
                 }
 
-                return null;
+                return (null, "Support system responded but did not return a ticket ID. Please try again.");
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogError("[Complaint] CRM call timed out after 120s");
+                return (null, "Support system is taking too long to respond. Please try again.");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[Complaint] CRM call failed");
-                return null;
+                _logger.LogError(ex, "[Complaint] CRM call threw exception");
+                return (null, "Could not reach support system. Please try again.");
             }
         }
 
