@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 
 namespace crud_app_backend.DTOs
 {
@@ -22,5 +22,19 @@ namespace crud_app_backend.DTOs
 
         /// <summary>Optional: raw message text, stored in audit log.</summary>
         public string? RawMessage { get; set; }
+
+        /// <summary>
+        /// When true, the repository will IGNORE complaint_images and complaint_voices
+        /// from the incoming TempData and instead preserve whatever arrays are
+        /// currently in the database row.
+        ///
+        /// Set this to true in every n8n "Prepare Send → POST Session to DB" call
+        /// so that concurrent image/voice appends are never overwritten by a
+        /// slightly-delayed full-session write.
+        ///
+        /// Only set to false (the default) when you intentionally want to CLEAR
+        /// the media arrays — e.g. when starting a brand-new complaint.
+        /// </summary>
+        public bool PreserveComplaintMedia { get; set; } = false;
     }
 }

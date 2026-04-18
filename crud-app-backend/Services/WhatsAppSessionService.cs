@@ -1,6 +1,7 @@
 ﻿using crud_app_backend.DTOs;
 using crud_app_backend.Models;
 using crud_app_backend.Repositories;
+
 namespace crud_app_backend.Services
 {
     public class WhatsAppSessionService : IWhatsAppSessionService
@@ -18,8 +19,6 @@ namespace crud_app_backend.Services
 
         // ─────────────────────────────────────────────────────────────────
         // GET SESSION
-        // Called by: GET /api/whatsapp/session?phone=...
-        // Always returns 200 — never throws for a missing session.
         // ─────────────────────────────────────────────────────────────────
         public async Task<SessionResponse> GetSessionAsync(
             string phone,
@@ -29,8 +28,6 @@ namespace crud_app_backend.Services
 
             if (session == null)
             {
-                // First contact from this phone number.
-                // Return a clean INIT state so n8n can start the conversation.
                 _logger.LogInformation(
                     "[WA-Service] New user — phone={Phone}", phone);
 
@@ -54,37 +51,35 @@ namespace crud_app_backend.Services
             return MapEntityToResponse(session, isNew: false);
         }
 
-
         // ─────────────────────────────────────────────────────────────────
         // UPSERT SESSION
-        // Called by: POST /api/whatsapp/session
-        // Converts the inbound DTO → entity, then delegates to repository.
-        // Returns ApiResponse<object> so the controller can return Ok(result).
+        // Passes PreserveComplaintMedia through to the repository so the
+        // full-session write from "Prepare Send" never clobbers atomically-
+        // appended complaint_images / complaint_voices.
         // ─────────────────────────────────────────────────────────────────
         public async Task<ApiResponseDto<object>> UpsertSessionAsync(
             UpsertSessionRequestDto req,
             CancellationToken ct = default)
         {
-            // Map request DTO → domain entity
             var entity = new WhatsAppSession
             {
                 Phone = req.Phone.Trim(),
                 CurrentStep = req.CurrentStep.Trim(),
                 PreviousStep = req.PreviousStep.Trim(),
-                TempData = string.IsNullOrWhiteSpace(req.TempData)
-                                    ? "{}"
-                                    : req.TempData,
+                TempData = string.IsNullOrWhiteSpace(req.TempData) ? "{}" : req.TempData,
                 PendingReport = req.PendingReport,
                 PendingShopReg = req.PendingShopReg,
-                // CreatedAt / UpdatedAt are set inside the repository
             };
 
-            // Repository handles INSERT vs UPDATE + history row in one transaction
-            await _repo.UpsertAsync(entity, req.RawMessage, ct);
+            await _repo.UpsertAsync(
+                entity,
+                req.RawMessage,
+                preserveComplaintMedia: req.PreserveComplaintMedia,
+                ct);
 
             _logger.LogInformation(
-                "[WA-Service] Session upserted — phone={Phone} step={Step}",
-                entity.Phone, entity.CurrentStep);
+                "[WA-Service] Session upserted — phone={Phone} step={Step} preserveMedia={Preserve}",
+                entity.Phone, entity.CurrentStep, req.PreserveComplaintMedia);
 
             return ApiResponseDto<object>.Ok(new
             {
@@ -93,11 +88,31 @@ namespace crud_app_backend.Services
             });
         }
 
+        // ─────────────────────────────────────────────────────────────────
+        // APPEND MEDIA  (new)
+        // ─────────────────────────────────────────────────────────────────
+        public async Task<AppendMediaResponseDto> AppendMediaAsync(
+            AppendMediaRequestDto req,
+            CancellationToken ct = default)
+        {
+            var result = await _repo.AppendMediaAsync(
+                req.Phone.Trim(),
+                req.MediaType.ToLowerInvariant(),
+                req.MessageId.Trim(),
+                ct);
+
+            _logger.LogInformation(
+                "[WA-Service] Media appended — phone={Phone} type={Type} " +
+                "images={ImgCount} voices={VoiceCount}",
+                req.Phone, req.MediaType,
+                result.ComplaintImages.Count,
+                result.ComplaintVoices.Count);
+
+            return result;
+        }
 
         // ─────────────────────────────────────────────────────────────────
         // DELETE SESSION
-        // Called by: DELETE /api/whatsapp/session?phone=...
-        // Returns Success=false (→ 404) when phone not found.
         // ─────────────────────────────────────────────────────────────────
         public async Task<ApiResponseDto<object>> DeleteSessionAsync(
             string phone,
@@ -123,18 +138,14 @@ namespace crud_app_backend.Services
                 "Session deleted successfully");
         }
 
-
         // ─────────────────────────────────────────────────────────────────
         // GET HISTORY
-        // Called by: GET /api/whatsapp/session/history?phone=...&limit=20
-        // Maps domain history entities → SessionHistoryDto list.
         // ─────────────────────────────────────────────────────────────────
         public async Task<List<WhatsAppSessionHistory>> GetHistoryAsync(
             string phone,
             int limit = 20,
             CancellationToken ct = default)
         {
-            // Guard — repository accepts any int, but let's be safe
             if (limit < 1 || limit > 200)
                 limit = 20;
 
@@ -144,7 +155,6 @@ namespace crud_app_backend.Services
                 "[WA-Service] History loaded — phone={Phone} rows={Count}",
                 phone, rows.Count);
 
-            // Map entity list → DTO list
             return rows.Select(h => new WhatsAppSessionHistory
             {
                 Id = h.Id,
@@ -156,9 +166,6 @@ namespace crud_app_backend.Services
             }).ToList();
         }
 
-
-        // ─────────────────────────────────────────────────────────────────
-        // Private helper — entity → response DTO
         // ─────────────────────────────────────────────────────────────────
         private static SessionResponse MapEntityToResponse(
             WhatsAppSession s, bool isNew) => new()
